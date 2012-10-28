@@ -201,6 +201,7 @@ bool	BSDOutputFormat = true;	/* if true emit traditional BSD Syslog lines,
 				 */
 char	appname[]   = "syslogd";/* the APPNAME for own messages */
 char   *include_pid = NULL;	/* include PID in own messages */
+struct pidfh *pfh = NULL;	/* PID file handle */
 
 
 /* init and setup */
@@ -306,6 +307,7 @@ main(int argc, char *argv[])
 	char *endp;
 	struct group   *gr;
 	struct passwd  *pw;
+	pid_t cpid;
 	unsigned long l;
 
 	/* should we set LC_TIME="C" to ensure correct timestamps&parsing? */
@@ -556,6 +558,18 @@ getgroup:
 #ifdef __NetBSD_Version__
 		pidfile(NULL);
 #endif /* __NetBSD_Version__ */
+#ifdef __FreeBSD_version
+		pfh = pidfile_open(_PATH_LOGPID, 0600, &cpid);
+		if (pfh == NULL) {
+			if (errno == EEXIST) {
+				logerror("syslogd already running, PID: %d",
+				    cpid);
+				die(0, 0, NULL);
+			}
+			logerror("could not open PID file");
+		}
+		pidfile_write(pfh);
+#endif /* __FreeBSD_version */
 	}
 
 #define MAX_PID_LEN 5
@@ -2948,6 +2962,11 @@ die(int fd, short event, void *ev)
 	FREEPTR(funix);
 	for (p = LogPaths; p && *p; p++)
 		unlink(*p);
+
+#ifdef __FreeBSD_version
+	pidfile_remove(pfh);
+#endif /* __FreeBSD_version */
+
 	exit(0);
 }
 
