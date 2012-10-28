@@ -2114,6 +2114,20 @@ format_buffer(struct buf_msg *buffer, char **line, size_t *ptr_linelen,
 	return true;
 }
 
+#ifndef HAVE_DEHUMANIZE_NUMBER
+#ifdef __FreeBSD_version
+/*
+ * FreeBSD's expand_number(3) seems to be equivalent to dehumanize_number(3)
+ * except in the sign of the second argument.
+ */
+int
+dehumanize_number(const char *str, int64_t *size)
+{
+	return (expand_number(str, (uint64_t *)size));
+}
+#endif /* __FreeBSD_version */
+#endif /* !HAVE_DEHUMANIZE_NUMBER */
+
 /*
  * if qentry == NULL: new message, if temporarily undeliverable it will be enqueued
  * if qentry != NULL: a temporarily undeliverable message will not be enqueued,
@@ -3859,9 +3873,9 @@ cfline(size_t linenum, const char *line, struct filed *f, const char *prog,
 		for (i = 0; i < MAXUNAMES && *p; i++) {
 			for (q = p; *q && *q != ','; )
 				q++;
-			(void)strncpy(f->f_un.f_uname[i], p, UT_NAMESIZE);
-			if ((q - p) > UT_NAMESIZE)
-				f->f_un.f_uname[i][UT_NAMESIZE] = '\0';
+			(void)strncpy(f->f_un.f_uname[i], p, LOGIN_NAME_MAX);
+			if ((q - p) > LOGIN_NAME_MAX)
+				f->f_un.f_uname[i][LOGIN_NAME_MAX] = '\0';
 			else
 				f->f_un.f_uname[i][q - p] = '\0';
 			while (*q == ',' || *q == ' ')

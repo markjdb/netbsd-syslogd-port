@@ -67,6 +67,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
+#include <inttypes.h>
 #include <locale.h>
 #include <netdb.h>
 #include <pwd.h>
@@ -77,7 +78,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdbool.h>
+#ifndef __FreeBSD_version
 #include <utmp.h>
+#endif /* !__FreeBSD_version */
 #ifdef __NetBSD_Version__
 #include <util.h>
 #include "utmpentry.h"
@@ -105,6 +108,13 @@
 #undef _PATH_UNIX
 #define _PATH_UNIX "kernel"
 #define HAVE_STRNDUP 0
+/* FreeBSD doesn't define LOGIN_NAME_MAX at the moment. */
+#ifndef LOGIN_NAME_MAX
+#define LOGIN_NAME_MAX	MAXLOGNAME
+#endif /* !LOGIN_NAME_MAX */
+#ifndef __UNCONST
+#define __UNCONST(a)    ((void *)(unsigned long)(const void *)(a))
+#endif /* !__UNCONST */
 #endif /* __FreeBSD_version */
 
 #ifdef __NetBSD_Version__
@@ -340,7 +350,7 @@ struct filed {
 #define PRI_GT	0x4
 	char	*f_program;		/* program this applies to */
 	union {
-		char	f_uname[MAXUNAMES][UT_NAMESIZE+1];
+		char	f_uname[MAXUNAMES][LOGIN_NAME_MAX + 1];
 		struct {
 			char	f_hname[MAXHOSTNAMELEN];
 			struct	addrinfo *f_addr;
