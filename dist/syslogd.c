@@ -199,6 +199,8 @@ bool	BSDOutputFormat = true;	/* if true emit traditional BSD Syslog lines,
 				 * this, it will only break some syslog-sign
 				 * configurations (e.g. with SG="0").
 				 */
+int	use_bootfile;		/* log entire bootfile for every kernel msg */
+char	bootfile[MAXLINE + 1];	/* booted kernel file */
 char	appname[]   = "syslogd";/* the APPNAME for own messages */
 char   *include_pid = NULL;	/* include PID in own messages */
 struct pidfh *pfh = NULL;	/* PID file handle */
@@ -308,13 +310,14 @@ main(int argc, char *argv[])
 	char *endp;
 	struct group   *gr;
 	struct passwd  *pw;
-	pid_t cpid;
 	unsigned long l;
+	pid_t cpid;
+	const char *s;
 
 	/* should we set LC_TIME="C" to ensure correct timestamps&parsing? */
 	(void)setlocale(LC_ALL, "");
 
-	while ((ch = getopt(argc, argv, "b:dnsSf:m:o:p:P:ruG:U:t:Tv")) != -1)
+	while ((ch = getopt(argc, argv, "b:dnsSf:m:op:P:ruG:U:t:Tv")) != -1)
 		switch(ch) {
 		case 'b':
 			bindhostname = optarg;
@@ -338,6 +341,10 @@ main(int argc, char *argv[])
 		case 'n':		/* turn off DNS queries */
 			UseNameService = 0;
 			break;
+		case 'o':
+			use_bootfile = 1;
+			break;
+#if 0
 		case 'o':		/* message format */
 #define EQ(a)		(strncmp(optarg, # a, sizeof(# a) - 1) == 0)
 			if (EQ(bsd) || EQ(rfc3264))
@@ -351,6 +358,7 @@ main(int argc, char *argv[])
 			 *	 FreeBSD PR#bin/7055.
 			 */
 			break;
+#endif
 		case 'p':		/* path */
 			logpath_add(&LogPaths, &funixsize,
 			    &funixmaxsize, optarg);
@@ -575,6 +583,15 @@ getgroup:
 #define MAX_PID_LEN 5
 	include_pid = malloc(MAX_PID_LEN+1);
 	snprintf(include_pid, MAX_PID_LEN+1, "%d", getpid());
+
+	/*
+	 * Get the kernel bootfile.
+	 */
+	if ((s = getbootfile()) == NULL) {
+		logerror("Warning: couldn't fetch kernel bootfile");
+		strlcpy(bootfile, _PATH_UNIX, sizeof(bootfile));
+	} else
+		(void)strlcpy(bootfile, s, sizeof(bootfile));
 
 	/*
 	 * Create the global kernel event descriptor.
@@ -1583,7 +1600,8 @@ printsys(char *msg)
 
 		/* set fields left open */
 		if (!buffer->prog)
-			buffer->prog = strdup(_PATH_UNIX);
+			buffer->prog = strdup(use_bootfile ?
+			    bootfile : _PATH_UNIX);
 		if (!buffer->host)
 			buffer->host = LocalFQDN;
 		if (!buffer->recvhost)
@@ -3629,6 +3647,18 @@ init(int fd, short event, void *ev)
 	if (oldLocalFQDN && strcmp(oldLocalFQDN, LocalFQDN) != 0)
 		loginfo("host name changed, \"%s\" to \"%s\"",
 		    oldLocalFQDN, LocalFQDN);
+
+	/*
+	 * Log the kernel boot file if we aren't going to use it as the prefix,
+	 * and if this is *not* a restart.
+	 */
+	if (ev == NULL && !use_bootfile) {
+		char bootfilemsg[MAXLINE + 1];
+		(void)snprintf(bootfilemsg, sizeof(bootfilemsg),
+		    "syslogd: kernel boot file is %s", bootfile);
+		logmsg_async(LOG_INFO | LOG_KERN, NULL, bootfilemsg,
+		    BSDSYSLOG | ADDDATE);
+	}
 
 	RESTORE_SIGNALS(omask);
 }
