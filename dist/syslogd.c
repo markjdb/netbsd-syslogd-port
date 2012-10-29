@@ -314,7 +314,7 @@ main(int argc, char *argv[])
 	/* should we set LC_TIME="C" to ensure correct timestamps&parsing? */
 	(void)setlocale(LC_ALL, "");
 
-	while ((ch = getopt(argc, argv, "b:dnsSf:m:o:p:P:ru:g:t:TUv")) != -1)
+	while ((ch = getopt(argc, argv, "b:dnsSf:m:o:p:P:ruG:U:t:Tv")) != -1)
 		switch(ch) {
 		case 'b':
 			bindhostname = optarg;
@@ -327,7 +327,7 @@ main(int argc, char *argv[])
 		case 'f':		/* configuration file */
 			ConfFile = optarg;
 			break;
-		case 'g':
+		case 'G':
 			group = optarg;
 			if (*group == '\0')
 				usage();
@@ -375,13 +375,13 @@ main(int argc, char *argv[])
 		case 'T':
 			RemoteAddDate = 1;
 			break;
-		case 'u':
+		case 'u':		/* only log specified priority */
+			UniquePriority = 1;
+			break;
+		case 'U':
 			user = optarg;
 			if (*user == '\0')
 				usage();
-			break;
-		case 'U':		/* only log specified priority */
-			UniquePriority = 1;
 			break;
 		case 'v':		/* log facility and priority */
 			if (LogFacPri < 2)
