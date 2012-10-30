@@ -317,10 +317,13 @@ main(int argc, char *argv[])
 	/* should we set LC_TIME="C" to ensure correct timestamps&parsing? */
 	(void)setlocale(LC_ALL, "");
 
-	while ((ch = getopt(argc, argv, "b:dnsSf:m:op:P:ruG:U:t:Tv")) != -1)
+	while ((ch = getopt(argc, argv, "b:cdnsSf:m:op:P:uG:U:t:Tv")) != -1)
 		switch(ch) {
 		case 'b':
 			bindhostname = optarg;
+			break;
+		case 'c':		/* disable "repeated" compression */
+			NoRepeat++;
 			break;
 		case 'd':		/* debug */
 			Debug = D_DEFAULT;
@@ -365,9 +368,6 @@ main(int argc, char *argv[])
 			break;
 		case 'P':		/* alternate pidfile */
 			pidfile = optarg;
-			break;
-		case 'r':		/* disable "repeated" compression */
-			NoRepeat++;
 			break;
 		case 's':		/* no network listen mode */
 			SecureMode++;
@@ -1953,7 +1953,7 @@ logmsg(struct buf_msg *buffer)
 		if ((buffer->flags & MARK) == 0 &&
 		    f->f_prevmsg &&
 		    buffer->msglen == f->f_prevmsg->msglen &&
-		    !NoRepeat &&
+		    !(NoRepeat - (f->f_type == F_PIPE ? 1 : 0)) &&
 		    MSG_FIELD_EQ(host) &&
 		    MSG_FIELD_EQ(sd) &&
 		    MSG_FIELD_EQ(msg)
