@@ -199,6 +199,7 @@ bool	BSDOutputFormat = true;	/* if true emit traditional BSD Syslog lines,
 				 * this, it will only break some syslog-sign
 				 * configurations (e.g. with SG="0").
 				 */
+int	preserve_kern_fac = 0;	/* keep remotely logged kern facility */
 int	use_bootfile;		/* log entire bootfile for every kernel msg */
 char	bootfile[MAXLINE + 1];	/* booted kernel file */
 char	appname[]   = "syslogd";/* the APPNAME for own messages */
@@ -317,7 +318,7 @@ main(int argc, char *argv[])
 	/* should we set LC_TIME="C" to ensure correct timestamps&parsing? */
 	(void)setlocale(LC_ALL, "");
 
-	while ((ch = getopt(argc, argv, "b:cdnsSf:m:op:P:uG:U:t:Tv")) != -1)
+	while ((ch = getopt(argc, argv, "b:cdnsSf:km:op:P:uG:U:t:Tv")) != -1)
 		switch(ch) {
 		case 'b':
 			bindhostname = optarg;
@@ -337,6 +338,9 @@ main(int argc, char *argv[])
 			group = optarg;
 			if (*group == '\0')
 				usage();
+			break;
+		case 'k':
+			preserve_kern_fac = 1;
 			break;
 		case 'm':		/* mark interval */
 			MarkInterval = atoi(optarg) * 60;
@@ -1523,7 +1527,7 @@ printline(const char *hname, char *msg, int flags)
 	 * NOTE: Since LOG_KERN == 0, this will also match
 	 *	 messages with no facility specified.
 	 */
-	if ((pri & LOG_FACMASK) == LOG_KERN)
+	if ((pri & LOG_FACMASK) == LOG_KERN && !preserve_kern_fac)
 		pri = LOG_MAKEPRI(LOG_USER, LOG_PRI(pri));
 
 	if (bsdsyslog) {
