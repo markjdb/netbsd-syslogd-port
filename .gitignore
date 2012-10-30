@@ -1,3 +1,4 @@
 *.o
 syslogd
 *.[1-9].gz
+.*.sw[op]
