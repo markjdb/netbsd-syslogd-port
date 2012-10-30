@@ -1,0 +1,37 @@
+1. Option conflicts:
+   * FreeBSD: -o means "print the full name of the kernel file" instead of just "kernel".
+   * NetBSD: -o <output_format> allows users to choose between RFC 3164 format
+     and RFC 5424 format.
+
+   * FreeBSD: -P <file> allows one to specify an alternate PID file.
+   * NetBSD: -P <file> is used to allow one to specify a list of sockets in a file.
+
+   * NetBSD: -S means "sync kernel messages immediately after receiving them."
+   * FreeBSD: -S <socket> is used to specify an alternate socket for privileged
+     applications
+
+   * FreeBSD: -u "unique priority logging", basically changes the priority
+     comparison operator from >= to ==.
+     - Note that this is NetBSD's -U.
+   * NetBSD: -u <uid> set UID after daemonizing.
+
+2. NetBSD options that aren't present on FreeBSD:
+
+   * -u <uid>: set UID after daemonizing.
+   * -g <gid>: set GID after daemonizing.
+   * -t <dir>: chroot to dir after daemonizing.
+   * -r: don't compress duplicate log messages.
+     - FreeBSD uses -c for this, and "-c" and "-c -c" have different meanings.
+   * -S: sync kernel messages to disk immediately
+
+3. FreeBSD options that aren't present on NetBSD:
+
+   * -4: force syslogd to use IPv4 only
+   * -6: force syslogd to use IPv6 only
+   * -8: don't mess with the high bit
+   * -A: when forwarding to a host, try to send the message to all addresses
+   * -a peer: allow the peer to log to this syslogd instance
+   * -C: create log files if they don't exist
+   * -k: preserve the "kern" facility of incoming messages (done)
+   * -N: disable binding on UDP sockets
+   * -l: specify locations for additional log sockets, along with perms
