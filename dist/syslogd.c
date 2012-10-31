@@ -585,7 +585,8 @@ getgroup:
 			}
 			logerror("could not open PID file '%s'", pidfile);
 		}
-		pidfile_write(pfh);
+		if (pidfile_write(pfh))
+			logerror("Warning: couldn't write to the PID file");
 #endif /* __FreeBSD_version */
 	}
 
@@ -4023,6 +4024,8 @@ struct socketEvent *
 socksetup(int af, const char *hostname)
 {
 	struct addrinfo hints, *res, *r;
+	const char *service;
+	char *cp;
 	int error, maxs;
 	int on = 1;
 	struct socketEvent *s, *socks;
@@ -4030,11 +4033,40 @@ socksetup(int af, const char *hostname)
 	if(SecureMode && !NumForwards)
 		return NULL;
 
+	service = "syslog";
+
+	/*
+	 * We have to handle this case for backwards compatibility:
+	 * If there are two (or more) colons but no '[' and ']',
+	 * assume this is an inet6 address without a service.
+	 */
+	if (hostname != NULL) {
+#ifdef INET6
+		if (*hostname == '[' && (cp = strchr(hostname, ']')) != NULL) {
+			hostname++;
+			*cp = '\0';
+			if (cp[1] == ':' && cp[2] != '\0')
+				service = cp + 2;
+		} else {
+#endif /* INET6 */
+			cp = strchr(hostname, ':');
+			if (cp != NULL && strchr(cp + 1, ':') == NULL) {
+				*cp = '\0';
+				if (cp[1] != '\0')
+					service = cp + 1;
+				if (cp == hostname)
+					hostname = NULL;
+			}
+#ifdef INET6
+		}
+#endif
+	}
+
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_flags = AI_PASSIVE;
 	hints.ai_family = af;
 	hints.ai_socktype = SOCK_DGRAM;
-	error = getaddrinfo(hostname, "syslog", &hints, &res);
+	error = getaddrinfo(hostname, service, &hints, &res);
 	if (error) {
 		errno = 0;
 		logerror("%s", gai_strerror(error));
