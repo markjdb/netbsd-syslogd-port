@@ -307,7 +307,7 @@ main(int argc, char *argv[])
 	gid_t gid = 0;
 	char *user = NULL;
 	char *group = NULL;
-	const char *root = "/";
+	const char *chrootdir = NULL;
 	char *endp;
 	struct group   *gr;
 	struct passwd  *pw;
@@ -380,8 +380,8 @@ main(int argc, char *argv[])
 			SyncKernel = 1;
 			break;
 		case 't':
-			root = optarg;
-			if (*root == '\0')
+			chrootdir = optarg;
+			if (*chrootdir == '\0')
 				usage();
 			break;
 		case 'T':
@@ -458,8 +458,8 @@ getgroup:
 		}
 	}
 
-	if (access(root, F_OK | R_OK)) {
-		logerror("Cannot access `%s'", root);
+	if (chrootdir != NULL && access(chrootdir, F_OK | R_OK)) {
+		logerror("Cannot access `%s'", chrootdir);
 		die(0, 0, NULL);
 	}
 
@@ -479,7 +479,6 @@ getgroup:
 		logerror("Couldn't allocate buffer for klog");
 		die(0, 0, NULL);
 	}
-
 
 #ifndef SUN_LEN
 #define SUN_LEN(unp) (strlen((unp)->sun_path) + 2)
@@ -539,23 +538,29 @@ getgroup:
 	    LOG_NFACILITIES, SIGN_NUM_PRIVALS);
 #endif
 
-	/*
-	 * All files are open, we can drop privileges and chroot
-	 */
-	DPRINTF(D_MISC, "Attempt to chroot to `%s'\n", root);
-	if (chroot(root) == -1) {
-		logerror("Failed to chroot to `%s'", root);
-		die(0, 0, NULL);
+	if (chrootdir != NULL) {
+		/*
+		 * All files are open, we can drop privileges and chroot.
+		 */
+		DPRINTF(D_MISC, "Attempt to chroot to `%s'\n", chrootdir);
+		if (chroot(chrootdir) == -1) {
+			logerror("Failed to chroot to `%s'", chrootdir);
+			die(0, 0, NULL);
+		}
 	}
-	DPRINTF(D_MISC, "Attempt to set GID/EGID to `%d'\n", gid);
-	if (setgid(gid) || setegid(gid)) {
-		logerror("Failed to set gid to `%d'", gid);
-		die(0, 0, NULL);
+	if (group != NULL) {
+		DPRINTF(D_MISC, "Attempt to set GID/EGID to `%d'\n", gid);
+		if (setgid(gid) || setegid(gid)) {
+			logerror("Failed to set gid to `%d'", gid);
+			die(0, 0, NULL);
+		}
 	}
-	DPRINTF(D_MISC, "Attempt to set UID/EUID to `%d'\n", uid);
-	if (setuid(uid) || seteuid(uid)) {
-		logerror("Failed to set uid to `%d'", uid);
-		die(0, 0, NULL);
+	if (user != NULL) {
+		DPRINTF(D_MISC, "Attempt to set UID/EUID to `%d'\n", uid);
+		if (setuid(uid) || seteuid(uid)) {
+			logerror("Failed to set uid to `%d'", uid);
+			die(0, 0, NULL);
+		}
 	}
 	/*
 	 * We cannot detach from the terminal before we are sure we won't
