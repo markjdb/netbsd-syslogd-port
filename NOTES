@@ -9,6 +9,9 @@
    * NetBSD: -S means "sync kernel messages immediately after receiving them."
    * FreeBSD: -S <socket> is used to specify an alternate socket for privileged
      applications
+     - FreeBSD syslogd uses syntax in syslog.conf to specify whether a log file
+       should be synced after it's been written; by default, kernel logs ARE
+       synced.
 
    * FreeBSD: -u "unique priority logging", basically changes the priority
      comparison operator from >= to ==.
@@ -20,18 +23,24 @@
    * -u <uid>: set UID after daemonizing.
    * -g <gid>: set GID after daemonizing.
    * -t <dir>: chroot to dir after daemonizing.
+     - These three options will be kept, except that they'll become -U, -G
+       and -t to avoid a conflict with FreeBSD.
+
    * -r: don't compress duplicate log messages.
      - FreeBSD uses -c for this, and "-c" and "-c -c" have different meanings.
    * -S: sync kernel messages to disk immediately
 
 3. FreeBSD options that aren't present on NetBSD:
 
-   * -4: force syslogd to use IPv4 only
-   * -6: force syslogd to use IPv6 only
+   * -4: force syslogd to use IPv4 only (done)
+   * -6: force syslogd to use IPv6 only (done)
    * -8: don't mess with the high bit
-   * -A: when forwarding to a host, try to send the message to all addresses
+   * -A: when forwarding to a host, try to send the message to all address
+         records
    * -a peer: allow the peer to log to this syslogd instance
-   * -C: create log files if they don't exist
+   * -b 'host:port': bind to the specific host/port (NetBSD doesn't provide
+                     the port field, but the option is otherwise there) (done)
+   * -C: create log files if they don't exist (done)
    * -k: preserve the "kern" facility of incoming messages (done)
-   * -N: disable binding on UDP sockets
    * -l: specify locations for additional log sockets, along with perms
+   * -N: disable binding on UDP sockets
