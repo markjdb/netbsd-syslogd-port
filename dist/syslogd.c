@@ -69,6 +69,7 @@ __RCSID("$NetBSD: syslogd.c,v 1.112 2012/06/20 01:39:34 christos Exp $");
  * Priority comparison code by Harlan Stenn.
  * TLS, syslog-protocol, and syslog-sign code by Martin Schuette.
  */
+
 #define SYSLOG_NAMES
 #include <poll.h>
 #include "syslogd.h"
@@ -92,7 +93,23 @@ int deny_severity = LOG_AUTH|LOG_WARNING;
 #endif
 
 const char	*ConfFile = _PATH_LOGCONF;
-char	ctty[] = _PATH_CONSOLE;
+const char	ctty[] = _PATH_CONSOLE;
+
+/*
+ * Unix sockets.
+ * We have two default sockets, one with 666 permissions, and one for privileged
+ * programs. The user may add to the list of sockets via the -l option.
+ */
+struct funix {
+	int		s;
+	const char 	*name;
+	mode_t		mode;
+	STAILQ_ENTRY(funix) next;
+};
+
+STAILQ_HEAD(, funix) funixes = STAILQ_HEAD_INITIALIZER(funixes);
+struct funix funix_secure = { -1, _PATH_LOG_PRIV, S_IRUSR | S_IWUSR, { NULL } };
+struct funix funix_default = { -1, _PATH_LOG, DEFFILEMODE, { NULL } };
 
 /*
  * Queue of about-to-be-dead processes we should watch out for.
@@ -223,6 +240,7 @@ struct socketEvent*
 int		getmsgbufsize(void);
 char	       *getLocalFQDN(void);
 void		trim_anydomain(char *);
+static void	double_rbuf(int);
 /* pipe & subprocess handling */
 int		p_open(char *, pid_t *);
 void		deadq_enter(pid_t, const char *);
@@ -304,9 +322,8 @@ int
 main(int argc, char *argv[])
 {
 	int ch, j, fklog;
-	int funixsize = 0, funixmaxsize = 0;
+	struct funix *fx, *fxtmp;
 	struct sockaddr_un sunx;
-	char **pp;
 	struct event *ev;
 	uid_t uid = 0;
 	gid_t gid = 0;
@@ -323,7 +340,7 @@ main(int argc, char *argv[])
 	/* should we set LC_TIME="C" to ensure correct timestamps&parsing? */
 	(void)setlocale(LC_ALL, "");
 
-	while ((ch = getopt(argc, argv, "46b:cCdnsSf:km:op:P:uG:U:t:Tv")) != -1)
+	while ((ch = getopt(argc, argv, "46b:cCdnf:G:km:op:P:sS:uU:t:Tv")) != -1)
 		switch (ch) {
 		case '4':
 			afamily = PF_INET;
@@ -382,9 +399,12 @@ main(int argc, char *argv[])
 			 */
 			break;
 #endif
-		case 'p':		/* path */
-			logpath_add(&LogPaths, &funixsize,
-			    &funixmaxsize, optarg);
+		case 'p':		/* socket path */
+			if (strlen(optarg) >= sizeof(sunx.sun_path)) {
+				logerror("socket path '%s' is too long", optarg);
+				die(0, 0, NULL);
+			}
+			funix_default.name = optarg;
 			break;
 		case 'P':		/* alternate pidfile */
 			pidfile = optarg;
@@ -392,8 +412,12 @@ main(int argc, char *argv[])
 		case 's':		/* no network listen mode */
 			SecureMode++;
 			break;
-		case 'S':
-			SyncKernel = 1;
+		case 'S':		/* path for privileged socket */
+			if (strlen(optarg) >= sizeof(sunx.sun_path)) {
+				logerror("socket path '%s' is too long", optarg);
+				die(0, 0, NULL);
+			}
+			funix_secure.name = optarg;
 			break;
 		case 't':
 			chrootdir = optarg;
@@ -499,28 +523,27 @@ getgroup:
 #ifndef SUN_LEN
 #define SUN_LEN(unp) (strlen((unp)->sun_path) + 2)
 #endif
-	if (funixsize == 0)
-		logpath_add(&LogPaths, &funixsize,
-		    &funixmaxsize, _PATH_LOG);
-	funix = malloc(sizeof(*funix) * funixsize);
-	if (funix == NULL) {
-		logerror("Couldn't allocate funix descriptors");
-		die(0, 0, NULL);
-	}
-	for (j = 0, pp = LogPaths; *pp; pp++, j++) {
-		DPRINTF(D_NET, "Making unix dgram socket `%s'\n", *pp);
-		unlink(*pp);
+	/* Local socket initialization. */
+	STAILQ_INSERT_HEAD(&funixes, &funix_secure, next);
+	STAILQ_INSERT_HEAD(&funixes, &funix_default, next);
+
+	STAILQ_FOREACH_SAFE(fx, &funixes, next, fxtmp) {
+		(void)unlink(fx->name);
 		memset(&sunx, 0, sizeof(sunx));
-		sunx.sun_family = AF_LOCAL;
-		(void)strncpy(sunx.sun_path, *pp, sizeof(sunx.sun_path));
-		funix[j] = socket(AF_LOCAL, SOCK_DGRAM, 0);
-		if (funix[j] < 0 || bind(funix[j],
-		    (struct sockaddr *)&sunx, SUN_LEN(&sunx)) < 0 ||
-		    chmod(*pp, 0666) < 0) {
-			logerror("Cannot create `%s'", *pp);
-			die(0, 0, NULL);
+		(void)strlcpy(sunx.sun_path, fx->name, sizeof(sunx.sun_path));
+		if ((fx->s = socket(PF_LOCAL, SOCK_DGRAM, 0)) < 0 ||
+		    bind(fx->s, (struct sockaddr *)&sunx, SUN_LEN(&sunx)) < 0 ||
+		    chmod(fx->name, fx->mode) < 0) {
+			logerror("couldn't allocate socket '%o:%s'", fx->mode,
+			    fx->name);
+			if (fx == &funix_default || fx == &funix_secure)
+				die(0, 0, NULL);
+			else {
+				STAILQ_REMOVE(&funixes, fx, funix, next);
+				continue;
+			}
 		}
-		DPRINTF(D_NET, "Listening on unix dgram socket `%s'\n", *pp);
+		double_rbuf(fx->s);
 	}
 
 	if ((fklog = open(_PATH_KLOG, O_RDONLY, 0)) < 0) {
@@ -687,10 +710,11 @@ getgroup:
 			dispatch_read_klog, ev);
 		EVENT_ADD(ev);
 	}
-	for (j = 0, pp = LogPaths; *pp; pp++, j++) {
+
+	STAILQ_FOREACH(fx, &funixes, next) {
 		ev = allocev();
-		event_set(ev, funix[j], EV_READ | EV_PERSIST,
-			dispatch_read_funix, ev);
+		event_set(ev, fx->s, EV_READ | EV_PERSIST,
+		    dispatch_read_funix, ev);
 		EVENT_ADD(ev);
 	}
 
@@ -2899,7 +2923,7 @@ void
 die(int fd, short event, void *ev)
 {
 	struct filed *f, *next;
-	char **p;
+	struct funix *fx;
 	sigset_t newmask, omask;
 	int i;
 	size_t j;
@@ -3004,8 +3028,8 @@ die(int fd, short event, void *ev)
 #endif /* !DISABLE_TLS */
 
 	FREEPTR(funix);
-	for (p = LogPaths; p && *p; p++)
-		unlink(*p);
+	STAILQ_FOREACH(fx, &funixes, next)
+		unlink(fx->name);
 
 #ifdef __FreeBSD_version
 	pidfile_remove(pfh);
@@ -4862,4 +4886,15 @@ writev1(int fd, struct iovec *iov, size_t count)
 		}
 	}
 	return tot == 0 ? nw : tot;
+}
+
+static void
+double_rbuf(int s)
+{
+	socklen_t slen, len;
+
+	if (getsockopt(s, SOL_SOCKET, SO_RCVBUF, &len, &slen) == 0) {
+		len *= 2;
+		setsockopt(s, SOL_SOCKET, SO_RCVBUF, &len, slen);
+	}
 }
