@@ -202,6 +202,7 @@ bool	BSDOutputFormat = true;	/* if true emit traditional BSD Syslog lines,
 int	preserve_kern_fac = 0;	/* keep remotely logged kern facility */
 int	use_bootfile;		/* log entire bootfile for every kernel msg */
 char	bootfile[MAXLINE + 1];	/* booted kernel file */
+int	logflags = O_WRONLY|O_APPEND;	/* flags used to open log files */
 char	appname[]   = "syslogd";/* the APPNAME for own messages */
 char   *include_pid = NULL;	/* include PID in own messages */
 struct pidfh *pfh = NULL;	/* PID file handle */
@@ -322,7 +323,7 @@ main(int argc, char *argv[])
 	/* should we set LC_TIME="C" to ensure correct timestamps&parsing? */
 	(void)setlocale(LC_ALL, "");
 
-	while ((ch = getopt(argc, argv, "46b:cdnsSf:km:op:P:uG:U:t:Tv")) != -1)
+	while ((ch = getopt(argc, argv, "46b:cCdnsSf:km:op:P:uG:U:t:Tv")) != -1)
 		switch (ch) {
 		case '4':
 			afamily = PF_INET;
@@ -337,6 +338,9 @@ main(int argc, char *argv[])
 			break;
 		case 'c':		/* disable "repeated" compression */
 			NoRepeat++;
+			break;
+		case 'C':
+			logflags |= O_CREAT;
 			break;
 		case 'd':		/* debug */
 			Debug = D_DEFAULT;
@@ -3907,7 +3911,7 @@ cfline(size_t linenum, const char *line, struct filed *f, const char *prog,
 			f->f_flags |= FFLAG_SIGN;
 #endif /* !DISABLE_SIGN */
 		(void)strlcpy(f->f_un.f_fname, p, sizeof(f->f_un.f_fname));
-		if ((f->f_file = open(p, O_WRONLY|O_APPEND, 0)) < 0) {
+		if ((f->f_file = open(p, logflags, 0)) < 0) {
 			f->f_type = F_UNUSED;
 			logerror("%s", p);
 			break;
