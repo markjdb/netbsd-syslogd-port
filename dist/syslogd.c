@@ -206,7 +206,11 @@ char	appname[]   = "syslogd";/* the APPNAME for own messages */
 char   *include_pid = NULL;	/* include PID in own messages */
 struct pidfh *pfh = NULL;	/* PID file handle */
 const char *pidfile = _PATH_LOGPID;
-
+#ifdef INET6
+int	afamily = PF_UNSPEC;	/* protocol family (IPv4, IPv6 or both) */
+#else
+int	afamily = PF_INET4;	/* protocol family (IPv4) */
+#endif /* INET6 */
 
 /* init and setup */
 void		usage(void) __attribute__((__noreturn__));
@@ -318,8 +322,16 @@ main(int argc, char *argv[])
 	/* should we set LC_TIME="C" to ensure correct timestamps&parsing? */
 	(void)setlocale(LC_ALL, "");
 
-	while ((ch = getopt(argc, argv, "b:cdnsSf:km:op:P:uG:U:t:Tv")) != -1)
-		switch(ch) {
+	while ((ch = getopt(argc, argv, "46b:cdnsSf:km:op:P:uG:U:t:Tv")) != -1)
+		switch (ch) {
+		case '4':
+			afamily = PF_INET;
+			break;
+#ifdef INET6
+		case '6':
+			afamily = PF_INET6;
+			break;
+#endif /* INET6 */
 		case 'b':
 			bindhostname = optarg;
 			break;
@@ -3551,7 +3563,7 @@ init(int fd, short event, void *ev)
 		}
 	}
 
-	finet = socksetup(PF_UNSPEC, bindhostname);
+	finet = socksetup(afamily, bindhostname);
 	if (finet) {
 		if (SecureMode) {
 			for (i = 0; i < finet->fd; i++) {
