@@ -1,0 +1,21 @@
+This is a little project which aims to replace FreeBSD's syslogd with NetBSD's
+syslogd, which has more features and in particular supports reliable and secure
+transport layers (i.e. not UDP).
+
+What I'd like to do here is:
+1. Get netbsd-syslogd to compile on FreeBSD and write src and ports makefiles
+   for it.
+
+2. Go through all of the history of FreeBSD's syslogd and look for features and
+   bug-fixes that should be ported over to netbsd-syslogd, the intent being to
+   allow netbsd-syslogd to become a drop-in replacement for FreeBSD's syslogd.
+
+   Both daemons come from a common code base, but they've diverged in e.g.
+   command-line options, syslog.conf syntax.
+
+3. Try and determine whether it'd be easy to replace the use of libevent with
+   kqueue, and then select the interface using a compile-time switch or
+   something. This isn't really necessary but it'd remove the dependency on
+   libevent, which would be nice if this ever gets considered for import into
+   the FreeBSD src tree. We'll see whether it can be done cleanly and without
+   too much new code.
