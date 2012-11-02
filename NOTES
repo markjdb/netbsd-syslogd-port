@@ -24,7 +24,7 @@
    * -g <gid>: set GID after daemonizing.
    * -t <dir>: chroot to dir after daemonizing.
      - These three options will be kept, except that they'll become -U, -G
-       and -t to avoid a conflict with FreeBSD.
+       and -t to avoid a conflict with FreeBSD syslogd's -U.
 
    * -r: don't compress duplicate log messages.
      - FreeBSD uses -c for this, and "-c" and "-c -c" have different meanings.
@@ -44,3 +44,14 @@
    * -k: preserve the "kern" facility of incoming messages (done)
    * -l: specify locations for additional log sockets, along with perms
    * -N: disable binding on UDP sockets
+
+4. Things left to do (incomplete):
+
+- Add "sync log file" syntax to syslog.conf
+- Man page updates
+- Add -8, -A, -a, -l, -N
+
+5. Random observations.
+
+- FreeBSD is calling double_rbuf() in the wrong place for local sockets.
+- NetBSD is using strncpy incorrectly(?) when allocating local sockets
