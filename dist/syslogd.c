@@ -187,7 +187,6 @@ char	*LocalFQDN = NULL;	       /* our FQDN */
 char	*oldLocalFQDN = NULL;	       /* our previous FQDN */
 char	LocalHostName[MAXHOSTNAMELEN]; /* our hostname */
 struct socketEvent *finet;	/* Internet datagram sockets and events */
-int   *funix;			/* Unix domain datagram sockets */
 #ifndef DISABLE_TLS
 struct socketEvent *TLS_Listen_Set; /* TLS/TCP sockets and events */
 #endif /* !DISABLE_TLS */
@@ -3027,7 +3026,6 @@ die(int fd, short event, void *ev)
 	FREE_SSL_CTX(tls_opt.global_TLS_CTX);
 #endif /* !DISABLE_TLS */
 
-	FREEPTR(funix);
 	STAILQ_FOREACH(fx, &funixes, next)
 		unlink(fx->name);
 
