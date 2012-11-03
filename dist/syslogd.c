@@ -4070,10 +4070,10 @@ socksetup(int af, const char *hostname)
 	int on = 1;
 	struct socketEvent *s, *socks;
 
-	if(SecureMode && !NumForwards)
-		return NULL;
-
 	service = "syslog";
+
+	if (SecureMode == 2 && !NumForwards)
+		return (NULL);
 
 	/*
 	 * We have to handle this case for backwards compatibility:
