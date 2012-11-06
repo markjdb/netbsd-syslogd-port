@@ -231,14 +231,13 @@ int	afamily = PF_INET4;	/* protocol family (IPv4) */
 
 /* init and setup */
 void		usage(void) __attribute__((__noreturn__));
-void		logpath_add(char ***, int *, int *, const char *);
-void		logpath_fileadd(char ***, int *, int *, const char *);
 void		init(int fd, short event, void *ev);  /* SIGHUP kevent dispatch routine */
 struct socketEvent*
 		socksetup(int, const char *);
 int		getmsgbufsize(void);
 char	       *getLocalFQDN(void);
 void		trim_anydomain(char *);
+static int	funix_add(const char *, size_t);
 static void	double_rbuf(int);
 /* pipe & subprocess handling */
 int		p_open(char *, pid_t *);
@@ -339,7 +338,7 @@ main(int argc, char *argv[])
 	/* should we set LC_TIME="C" to ensure correct timestamps&parsing? */
 	(void)setlocale(LC_ALL, "");
 
-	while ((ch = getopt(argc, argv, "46b:cCdnf:G:km:op:P:sS:uU:t:Tv")) != -1)
+	while ((ch = getopt(argc, argv, "46b:cCdnf:G:l:km:op:P:sS:uU:t:Tv")) != -1)
 		switch (ch) {
 		case '4':
 			afamily = PF_INET;
@@ -370,6 +369,10 @@ main(int argc, char *argv[])
 			group = optarg;
 			if (*group == '\0')
 				usage();
+			break;
+		case 'l':		/* socket path, optional mode */
+			if (funix_add(optarg, sizeof(sunx.sun_path)))
+				die(0, 0, NULL);
 			break;
 		case 'k':
 			preserve_kern_fac = 1;
@@ -853,57 +856,65 @@ dispatch_read_finet(int fd, short event, void *ev)
 }
 
 /*
- * given a pointer to an array of char *'s, a pointer to its current
- * size and current allocated max size, and a new char * to add, add
- * it, update everything as necessary, possibly allocating a new array
+ * Parse an absolute path with an optional permission mask, and add the
+ * corresponding structure to the local socket list. We expect the input string
+ * to be of the form [<perms>:]<path> and return a non-zero value if it isn't.
+ * Otherwise zero is returned.
  */
-void
-logpath_add(char ***lp, int *szp, int *maxszp, const char *new)
+static int
+funix_add(const char *sinfo, size_t pathmax)
 {
-	char **nlp;
-	int newmaxsz;
+	struct funix *fx;
+	const char *path;
+	char *sep;
+	long perml;
+	mode_t mode;
 
-	DPRINTF(D_FILE, "Adding `%s' to the %p logpath list\n", new, *lp);
-	if (*szp == *maxszp) {
-		if (*maxszp == 0) {
-			newmaxsz = 4;	/* start of with enough for now */
-			*lp = NULL;
-		} else
-			newmaxsz = *maxszp * 2;
-		nlp = realloc(*lp, sizeof(char *) * (newmaxsz + 1));
-		if (nlp == NULL) {
-			logerror("Couldn't allocate line buffer");
-			die(0, 0, NULL);
+	while (isspace(*sinfo))
+		sinfo++;
+
+	if (sinfo[0] == '/') {
+		/* No permission mask given. */
+		mode = DEFFILEMODE;
+		path = sinfo;
+	} else if ((path = strchr(sinfo, ':')) != NULL) {
+		if (*(++path) != '/') {
+			logerror("socket path must be absolute in '%s'", sinfo);
+			return (1);
+		} else if (!isdigit(*sinfo)) {
+			logerror("socket mode is invalid in '%s'", sinfo);
+			return (1);
 		}
-		*lp = nlp;
-		*maxszp = newmaxsz;
+
+		perml = strtoul(sinfo, &sep, 8);
+		if (sep != path - 1 || perml < 0 ||
+		    perml & ~(S_IRWXU|S_IRWXG|S_IRWXO)) {
+			logerror("socket mode is invalid in '%s'", sinfo);
+			return (1);
+		}
+		mode = (mode_t)perml;
+	} else {
+		logerror("socket path must be absolute in '%s'", sinfo);
+		return (1);
 	}
-	if (((*lp)[(*szp)++] = strdup(new)) == NULL) {
-		logerror("Couldn't allocate logpath");
+
+	if (strlen(path) >= pathmax) {
+		logerror("socket path too long in '%s'", sinfo);
+		return (1);
+	}
+
+	if ((fx = malloc(sizeof(*fx))) == NULL) {
+		logerror("Failed to allocate memory");
 		die(0, 0, NULL);
 	}
-	(*lp)[(*szp)] = NULL;		/* always keep it NULL terminated */
-}
 
-/* do a file of log sockets */
-void
-logpath_fileadd(char ***lp, int *szp, int *maxszp, const char *file)
-{
-	FILE *fp;
-	char *line;
-	size_t len;
+	fx->s = -1;
+	fx->name = path;
+	fx->mode = mode;
 
-	fp = fopen(file, "r");
-	if (fp == NULL) {
-		logerror("Could not open socket file list `%s'", file);
-		die(0, 0, NULL);
-	}
+	STAILQ_INSERT_HEAD(&funixes, fx, next);
 
-	while ((line = fgetln(fp, &len)) != NULL) {
-		line[len - 1] = 0;
-		logpath_add(lp, szp, maxszp, line);
-	}
-	fclose(fp);
+	return (0);
 }
 
 /*
@@ -1792,9 +1803,9 @@ check_timestamp(unsigned char *from_buf, char **to_buf,
 			/* NILVALUE */
 			if (to_iso) {
 				/* with ISO = syslog-protocol output leave
-			 	 * it as is, because it is better to have
-			 	 * no timestamp than a wrong one.
-			 	 */
+				 * it as is, because it is better to have
+				 * no timestamp than a wrong one.
+				 */
 				*to_buf = strdup("-");
 			} else {
 				/* with BSD Syslog the field is reqired
