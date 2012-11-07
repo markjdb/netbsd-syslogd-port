@@ -195,6 +195,7 @@ int	ShuttingDown;		/* set when we die() */
 int	MarkInterval = 20 * 60; /* interval between marks in seconds */
 int	MarkSeq = 0;		/* mark sequence number */
 int	SecureMode = 0;		/* listen only on unix domain socks */
+int	NoBind = 0;		/* don't bind() as suggested by RFC 3164 */
 int	UseNameService = 1;	/* make domain name queries */
 int	NumForwards = 0;	/* number of forwarding actions in conf file */
 char	**LogPaths;		/* array of pathnames to read messages from */
@@ -216,18 +217,20 @@ bool	BSDOutputFormat = true;	/* if true emit traditional BSD Syslog lines,
 				 * configurations (e.g. with SG="0").
 				 */
 int	preserve_kern_fac = 0;	/* keep remotely logged kern facility */
-int	use_bootfile;		/* log entire bootfile for every kernel msg */
+int	use_bootfile = 0;	/* log entire bootfile for every kernel msg */
 char	bootfile[MAXLINE + 1];	/* booted kernel file */
 int	logflags = O_WRONLY|O_APPEND;	/* flags used to open log files */
 char	appname[]   = "syslogd";/* the APPNAME for own messages */
-char   *include_pid = NULL;	/* include PID in own messages */
-struct pidfh *pfh = NULL;	/* PID file handle */
-const char *pidfile = _PATH_LOGPID;
+char	*include_pid = NULL;	/* include PID in own messages */
 #ifdef INET6
 int	afamily = PF_UNSPEC;	/* protocol family (IPv4, IPv6 or both) */
 #else
 int	afamily = PF_INET4;	/* protocol family (IPv4) */
 #endif /* INET6 */
+int	send_to_all = 0;	/* log to all hosts with a given name */
+
+struct pidfh *pfh = NULL;	/* PID file handle */
+const char *pidfile = _PATH_LOGPID;
 
 /* init and setup */
 void		usage(void) __attribute__((__noreturn__));
@@ -338,7 +341,7 @@ main(int argc, char *argv[])
 	/* should we set LC_TIME="C" to ensure correct timestamps&parsing? */
 	(void)setlocale(LC_ALL, "");
 
-	while ((ch = getopt(argc, argv, "46b:cCdnf:G:l:km:op:P:sS:uU:t:Tv")) != -1)
+	while ((ch = getopt(argc, argv, "46Ab:cCdnf:G:l:km:NoP:p:S:sU:uTt:v")) != -1)
 		switch (ch) {
 		case '4':
 			afamily = PF_INET;
@@ -348,6 +351,9 @@ main(int argc, char *argv[])
 			afamily = PF_INET6;
 			break;
 #endif /* INET6 */
+		case 'A':
+			send_to_all = 1;
+			break;
 		case 'b':
 			bindhostname = optarg;
 			break;
@@ -379,6 +385,10 @@ main(int argc, char *argv[])
 			break;
 		case 'm':		/* mark interval */
 			MarkInterval = atoi(optarg) * 60;
+			break;
+		case 'N':		/* don't bind to sockets */
+			NoBind = 1;
+			SecureMode = 1;
 			break;
 		case 'n':		/* turn off DNS queries */
 			UseNameService = 0;
@@ -2587,7 +2597,7 @@ fprintlog(struct filed *f, struct buf_msg *passedbuffer, struct buf_queue *qentr
 void
 udp_send(struct filed *f, char *line, size_t len)
 {
-	int lsent, fail, retry, j;
+	int lsent, fail, retry, err, j;
 	struct addrinfo *r;
 
 	DPRINTF((D_NET|D_CALL), "udp_send(f=%p, line=\"%s\", "
@@ -2621,6 +2631,7 @@ sendagain:
 					break;
 				default:
 					/* busted */
+					err = errno;
 					fail++;
 					break;
 				}
@@ -2629,8 +2640,9 @@ sendagain:
 		}
 		if ((size_t)lsent != len && fail) {
 			f->f_type = F_UNUSED;
-			logerror("sendto() failed");
-		}
+			logerror("sendto() failed: %s", strerror(errno));
+		} else if ((size_t)lsent == len && !send_to_all)
+			break;
 	}
 }
 
@@ -3471,8 +3483,7 @@ init(int fd, short event, void *ev)
 	/*
 	 *  Reset counter of forwarding actions
 	 */
-
-	NumForwards=0;
+	NumForwards = 0;
 
 	/* new destination list to replace Files */
 	newf = NULL;
@@ -4081,7 +4092,7 @@ socksetup(int af, const char *hostname)
 
 	service = "syslog";
 
-	if (SecureMode == 2 && !NumForwards)
+	if (SecureMode == 2 || (SecureMode == 1 && NumForwards == 0))
 		return (NULL);
 
 	/*
@@ -4146,7 +4157,7 @@ socksetup(int af, const char *hostname)
 			continue;
 		}
 
-		if (!SecureMode) {
+		if (!NoBind) {
 			if (bind(s->fd, r->ai_addr, r->ai_addrlen) < 0) {
 				logerror("bind() failed");
 				close(s->fd);
@@ -4157,13 +4168,15 @@ socksetup(int af, const char *hostname)
 				dispatch_read_finet, s->ev);
 			if (event_add(s->ev, NULL) == -1) {
 				DPRINTF((D_EVENT|D_NET),
-				    "Failure in event_add()\n");
+				    "Failure in event_add(): %s\n",
+				    strerror(errno));
 			} else {
 				DPRINTF((D_EVENT|D_NET),
-				    "Listen on UDP port "
-				    "(event@%p)\n", s->ev);
+				    "Listen on UDP port (event@%p)\n", s->ev);
 			}
 		}
+		if (!SecureMode)
+			double_rbuf(s->fd);
 
 		socks->fd++;  /* num counter */
 		s++;
@@ -4905,5 +4918,7 @@ double_rbuf(int s)
 	if (getsockopt(s, SOL_SOCKET, SO_RCVBUF, &len, &slen) == 0) {
 		len *= 2;
 		setsockopt(s, SOL_SOCKET, SO_RCVBUF, &len, slen);
-	}
+	} else
+		DPRINTF(D_NET, "Failed to get rcvbuf size of descriptor %d: %s",
+		    s, strerror(errno));
 }
