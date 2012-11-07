@@ -36,20 +36,20 @@
    * -6: force syslogd to use IPv6 only (done)
    * -8: don't mess with the high bit
    * -A: when forwarding to a host, try to send the message to all address
-         records
-   * -a peer: allow the peer to log to this syslogd instance
+         records (done)
+   * -a peer: allow the specified peer to log to this syslogd instance
    * -b 'host:port': bind to the specific host/port (NetBSD doesn't provide
                      the port field, but the option is otherwise there) (done)
    * -C: create log files if they don't exist (done)
    * -k: preserve the "kern" facility of incoming messages (done)
-   * -l: specify locations for additional log sockets, along with perms
-   * -N: disable binding on UDP sockets
+   * -l: specify locations for additional log sockets, along with perms (done)
+   * -N: disable binding on UDP sockets (done)
 
 4. Things left to do (incomplete):
 
 - Add "sync log file" syntax to syslog.conf
 - Man page updates
-- Add -8, -A, -a, -l, -N
+- Add -8, -a
 
 5. Random observations.
 
