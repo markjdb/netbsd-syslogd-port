@@ -123,6 +123,24 @@ typedef struct deadq_entry {
 } *dq_t;
 
 /*
+ * Records of network addresses that are allowed to send us log messages.
+ */
+struct allowedpeer {
+	int		isnumeric;
+	uint16_t	port;
+	union {
+		struct {
+			struct sockaddr_storage addr;
+			struct sockaddr_storage mask;
+		} numeric;
+		char	*name;
+	} u;
+#define a_addr	u.numeric.addr
+#define a_mask	u.numeric.mask
+#define a_name	u.name
+};
+
+/*
  * The timeout to apply to processes waiting on the dead queue.	 Unit
  * of measure is "mark intervals", i.e. 20 minutes by default.
  * Processes on the dead queue will be terminated after that time.
@@ -228,6 +246,8 @@ int	afamily = PF_UNSPEC;	/* protocol family (IPv4, IPv6 or both) */
 int	afamily = PF_INET4;	/* protocol family (IPv4) */
 #endif /* INET6 */
 int	send_to_all = 0;	/* log to all hosts with a given name */
+int	num_peers = 0;		/* number of hosts in AllowedPeers */
+struct allowedpeer *allowed_peers; /* list of peers allowed to send us logs */
 
 struct pidfh *pfh = NULL;	/* PID file handle */
 const char *pidfile = _PATH_LOGPID;
@@ -240,7 +260,8 @@ struct socketEvent*
 int		getmsgbufsize(void);
 char	       *getLocalFQDN(void);
 void		trim_anydomain(char *);
-static int	funix_add(const char *, size_t);
+static int	allow_peer(char *);
+static int	funix_add(char *, size_t);
 static void	double_rbuf(int);
 /* pipe & subprocess handling */
 int		p_open(char *, pid_t *);
@@ -341,7 +362,7 @@ main(int argc, char *argv[])
 	/* should we set LC_TIME="C" to ensure correct timestamps&parsing? */
 	(void)setlocale(LC_ALL, "");
 
-	while ((ch = getopt(argc, argv, "46Ab:cCdnf:G:l:km:NoP:p:S:sU:uTt:v")) != -1)
+	while ((ch = getopt(argc, argv, "46Aa:b:cCdnf:G:l:km:NoP:p:S:sU:uTt:v")) != -1)
 		switch (ch) {
 		case '4':
 			afamily = PF_INET;
@@ -353,6 +374,10 @@ main(int argc, char *argv[])
 #endif /* INET6 */
 		case 'A':
 			send_to_all = 1;
+			break;
+		case 'a':		/* add remote peer */
+			if (allow_peer(optarg))
+				die(0, 0, NULL);
 			break;
 		case 'b':
 			bindhostname = optarg;
@@ -866,18 +891,183 @@ dispatch_read_finet(int fd, short event, void *ev)
 }
 
 /*
+ * Add an address to the list of addresses from which we accept log messages.
+ * The address must be of the form <ipaddr>/<mask>[:service] or
+ * [*]<domain>[:service]. For IPv6 addresses, <ipaddr> must be enclosed
+ * in '[' and ']'. <service> may be given either as a port number or a service
+ * name; if it is not specified, port 514 (syslog) is used.
+ *
+ * If the address could not be parsed, a non-zero value is returned.
+ */
+static int
+allow_peer(char *peer)
+{
+	struct allowedpeer ap;
+	struct addrinfo hints, *res;
+	struct servent *se;
+	struct in_addr *addrp, *maskp;
+#ifdef INET6
+	uint32_t *mp, *addr6p, *mask6p;
+	int i;
+#endif /* INET6 */
+	char *addr, *port, *mask, *cp;
+	long masklen;
+
+	DPRINTF(D_CALL, "allow_peer(\"%s\")\n", peer);
+
+	masklen = -1;
+	memset(&ap, 0, sizeof(ap));
+
+	/*
+	 * Make sure we don't look for a ':<port>' until after the end of an
+	 * IPv6 address.
+	 */
+	if (*peer != '[' || (cp = strchr(peer, ']')) == NULL)
+		cp = peer;
+
+	if ((port = strrchr(cp, ':')) != NULL) {
+		*(port++) = '\0';
+		if (strlen(port) == 1 && *port == '*')
+			ap.port = 0;
+		else if ((se = getservbyname(port, "udp")) != NULL)
+			ap.port = ntohs(se->s_port);
+		else {
+			errno = 0;
+			ap.port = strtoul(port, &cp, 10);
+			if (*cp != '\0' || errno) {
+				logerror("invalid port description '%s'", port);
+				return (1);
+			}
+		}
+	} else {
+		if ((se = getservbyname("syslog", "udp")) != NULL)
+			ap.port = ntohs(se->s_port);
+		else
+			ap.port = 514;
+	}
+
+	if ((mask = strchr(peer, '/')) != NULL) {
+		*(mask++) = '\0';
+		if (strlen(mask) == strspn(mask, "0123456789")) {
+			errno = 0;
+			masklen = strtol(mask, &cp, 10);
+			if (*cp != '\0' || errno || masklen < 0) {
+				logerror("invalid mask length '%s'", mask);
+				return (1);
+			}
+		} else {
+			logerror("invalid mask length '%s'", mask);
+			return (1);
+		}
+	}
+
+#ifdef INET6
+	if (*peer == '[') {
+		cp = strchr(peer, ']');
+		if (cp == NULL || *(cp + 1) != '\0') {
+			logerror("invalid IP address '%s'", peer);
+			return (1);
+		}
+		addr = peer + 1;
+		*cp = '\0';
+	} else
+#endif /* INET6 */
+		addr = peer;
+
+	memset(&hints, 0, sizeof(hints));
+#ifdef INET6
+	hints.ai_family = PF_UNSPEC;
+#else
+	hints.ai_family = PF_INET4;
+#endif /* INET6 */
+	hints.ai_socktype = SOCK_DGRAM;
+	hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
+
+	DPRINTF(D_NET, "getaddrinfo(\"%s\")\n", addr);
+
+	if (getaddrinfo(addr, NULL, &hints, &res) == 0) {
+		ap.isnumeric = 1;
+		ap.a_mask.ss_family = res->ai_family;
+		(void)memcpy(&ap.a_addr, res->ai_addr, res->ai_addrlen);
+		if (res->ai_family == AF_INET) {
+			ap.a_mask.ss_len = sizeof(struct sockaddr_in);
+			addrp = &((struct sockaddr_in *)&ap.a_addr)->sin_addr;
+			maskp = &((struct sockaddr_in *)&ap.a_mask)->sin_addr;
+			if (masklen == -1) {
+				if (IN_CLASSA(ntohl(addrp->s_addr)))
+					maskp->s_addr = htonl(IN_CLASSA_NET);
+				else if (IN_CLASSB(ntohl(addrp->s_addr)))
+					maskp->s_addr = htonl(IN_CLASSB_NET);
+				else
+					maskp->s_addr = htonl(IN_CLASSC_NET);
+			} else if (masklen <= 32) {
+				if (masklen == 0)
+					maskp->s_addr = masklen;
+				else
+					maskp->s_addr =
+					    htonl(~((1 << (32 - masklen)) - 1));
+			} else {
+				logerror("invalid IPv4 mask '%s'", mask);
+				freeaddrinfo(res);
+				return (1);
+			}
+			addrp->s_addr &= maskp->s_addr;
+		}
+#ifdef INET6
+		else if (res->ai_family == AF_INET6) {
+			ap.a_mask.ss_len = sizeof(struct sockaddr_in6);
+			addr6p = (uint32_t *)
+			    &((struct sockaddr_in6 *)&ap.a_addr)->sin6_addr;
+			mask6p = (uint32_t *)
+			    &((struct sockaddr_in6 *)&ap.a_mask)->sin6_addr;
+			if (masklen == 0)
+				masklen = 128;
+			mp = mask6p;
+			while (masklen > 0) {
+				if (masklen < 32) {
+					*mp = htonl(~(0xffffffff >> masklen));
+					break;
+				}
+				*(mp++) = 0xffffffff;
+				masklen -= 32;
+			}
+			for (i = 0; i < 4; i++)
+				addr6p[i] &= mask6p[i];
+		}
+#endif /* INET6 */
+		else {
+			logerror("invalid address family for '%s'", addr);
+			freeaddrinfo(res);
+			return (1);
+		}
+	} else {
+		/* Otherwise 'addr' is a domain name. */
+		ap.isnumeric = 0;
+		ap.a_name = addr;
+	}
+
+	if ((allowed_peers =
+	    realloc(allowed_peers, ++num_peers * sizeof(ap))) == NULL) {
+		logerror("Failed to allocate memory");
+		return (1);
+	}
+	(void)memcpy(&allowed_peers[num_peers - 1], &ap, sizeof(ap));
+
+	return (0);
+}
+
+/*
  * Parse an absolute path with an optional permission mask, and add the
  * corresponding structure to the local socket list. We expect the input string
  * to be of the form [<perms>:]<path> and return a non-zero value if it isn't.
  * Otherwise zero is returned.
  */
 static int
-funix_add(const char *sinfo, size_t pathmax)
+funix_add(char *sinfo, size_t pathmax)
 {
 	struct funix *fx;
-	const char *path;
-	char *sep;
-	long perml;
+	char *path, *sep;
+	unsigned long perml;
 	mode_t mode;
 
 	while (isspace(*sinfo))
@@ -888,7 +1078,8 @@ funix_add(const char *sinfo, size_t pathmax)
 		mode = DEFFILEMODE;
 		path = sinfo;
 	} else if ((path = strchr(sinfo, ':')) != NULL) {
-		if (*(++path) != '/') {
+		*(path++) = '\0';
+		if (*path != '/') {
 			logerror("socket path must be absolute in '%s'", sinfo);
 			return (1);
 		} else if (!isdigit(*sinfo)) {
@@ -896,8 +1087,9 @@ funix_add(const char *sinfo, size_t pathmax)
 			return (1);
 		}
 
+		errno = 0;
 		perml = strtoul(sinfo, &sep, 8);
-		if (sep != path - 1 || perml < 0 ||
+		if (*sep != '\0' || errno ||
 		    perml & ~(S_IRWXU|S_IRWXG|S_IRWXO)) {
 			logerror("socket mode is invalid in '%s'", sinfo);
 			return (1);
