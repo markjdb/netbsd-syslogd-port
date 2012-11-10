@@ -40,10 +40,13 @@
 .Op Fl a Ar allowed_peer
 .Op Fl b Ar bind_address
 .Op Fl f Ar config_file
+.Op Fl G Ar group
 .Op Fl l Oo Ar mode : Oc Ns Ar path
 .Op Fl m Ar mark_interval
 .Op Fl P Ar pid_file
 .Op Fl p Ar log_socket
+.Op Fl t Ar chroot_dir
+.Op Fl U Ar user
 .Sh DESCRIPTION
 The
 .Nm
@@ -213,6 +216,10 @@ This is probably only of use to developers working on
 Specify the pathname of an alternate configuration file;
 the default is
 .Pa /etc/syslog.conf .
+.It Fl G Ar group
+Set GID to
+.Ar group
+after the sockets and log files have been opened.
 .It Fl k
 Disable the translation of
 messages received with facility
@@ -274,6 +281,15 @@ Always use the local time and date for messages received from the network,
 instead of the timestamp field supplied in the message by the remote host.
 This is useful if some of the originating hosts can't keep time properly
 or are unable to generate a correct timestamp.
+.It Fl t Ar chroot_dir
+.Xr chroot 2
+to
+.Ar chroot_dir
+after the sockets and log files have been opened.
+.It Fl U Ar user
+Set UID to
+.Ar user
+after the sockets and log files have been opened.
 .It Fl u
 Unique priority logging.
 Only log messages at the specified priority.
