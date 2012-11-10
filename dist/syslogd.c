@@ -69,6 +69,7 @@ __RCSID("$NetBSD: syslogd.c,v 1.112 2012/06/20 01:39:34 christos Exp $");
  * Priority comparison code by Harlan Stenn.
  * TLS, syslog-protocol, and syslog-sign code by Martin Schuette.
  */
+#include <sys/mman.h>
 
 #define SYSLOG_NAMES
 #include <poll.h>
@@ -360,6 +361,10 @@ main(int argc, char *argv[])
 	unsigned long l;
 	pid_t cpid;
 	const char *s;
+
+	/* Avoid killing the process in high-pressure swapping environments. */
+	if (madvise(NULL, 0, MADV_PROTECT))
+		logerror("madvise() failed");
 
 	/* should we set LC_TIME="C" to ensure correct timestamps&parsing? */
 	(void)setlocale(LC_ALL, "");
