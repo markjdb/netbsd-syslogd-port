@@ -673,7 +673,10 @@ getgroup:
 	}
 
 #define MAX_PID_LEN 5
-	include_pid = malloc(MAX_PID_LEN+1);
+	if ((include_pid = malloc(MAX_PID_LEN + 1)) == NULL) {
+		logerror("Failed to allocate memory");
+		die(0, 0, NULL);
+	}
 	snprintf(include_pid, MAX_PID_LEN+1, "%d", getpid());
 
 	/*
@@ -1347,7 +1350,11 @@ printline_syslogprotocol(const char *hname, char *msg,
 	if (flags & ADDDATE) {
 		FREEPTR(buffer->timestamp);
 		buffer->timestamp = strdup(make_timestamp(NULL,
-			!BSDOutputFormat));
+		    !BSDOutputFormat));
+		if (buffer->timestamp == NULL) {
+			logerror("Failed to allocate memory for timestamp");
+			return (NULL);
+		}
 	}
 
 	start = p;
@@ -1481,10 +1488,12 @@ all_syslog_msg:
 	DPRINTF(D_DATA, "Got msg \"%s\"\n", buffer->msg);
 
 	buffer->recvhost = strdup(hname);
+	if ((buffer->recvhost = strdup(hname)) == NULL)
+		logerror("Failed to allocate memory for hostname");
 	buffer->pri = pri;
 	buffer->flags = flags;
 
-	return buffer;
+	return (buffer);
 }
 
 /* copies an input into a new ASCII buffer
@@ -1564,7 +1573,9 @@ printline_bsdsyslog(const char *hname, char *msg,
 	if (flags & ADDDATE || !buffer->timestamp) {
 		FREEPTR(buffer->timestamp);
 		buffer->timestamp = strdup(make_timestamp(NULL,
-			!BSDOutputFormat));
+		    !BSDOutputFormat));
+		if (buffer->timestamp == NULL)
+			logerror("Failed to allocate memory");
 	}
 
 	if (*p == ' ') p++; /* SP */
@@ -1704,6 +1715,8 @@ all_bsd_msg:
 	DPRINTF(D_DATA, "Got msg \"%s\"\n", buffer->msg);
 
 	buffer->recvhost = strdup(hname);
+	if (buffer->recvhost == NULL)
+		logerror("Failed to allocate memory for host");
 	buffer->pri = pri;
 	buffer->flags = flags | BSDSYSLOG;
 
@@ -1723,6 +1736,8 @@ printline_kernelprintf(const char *hname, char *msg,
 
 	buffer = buf_msg_new(0);
 	buffer->timestamp = strdup(make_timestamp(NULL, !BSDOutputFormat));
+	if (buffer->timestamp == NULL)
+		logerror("Failed to allocate memory for timestamp");
 	buffer->pri = pri;
 	buffer->flags = flags;
 
@@ -1872,9 +1887,10 @@ printsys(char *msg)
 		}
 
 		/* set fields left open */
-		if (!buffer->prog)
+		if (!buffer->prog) {
 			buffer->prog = strdup(use_bootfile ?
 			    bootfile : _PATH_UNIX);
+		}
 		if (!buffer->host)
 			buffer->host = LocalFQDN;
 		if (!buffer->recvhost)
@@ -1940,8 +1956,13 @@ logmsg_async(int pri, const char *sd, const char *msg, int flags)
 	} else {
 		buffer = buf_msg_new(0);
 	}
-	if (sd) buffer->sd = strdup(sd);
-	buffer->timestamp = strdup(make_timestamp(NULL, !BSDOutputFormat));
+	if (sd) {
+		if ((buffer->sd = strdup(sd)) == NULL)
+			logerror("Failed to allocate memory for SD field");
+	}
+	if ((buffer->timestamp =
+	    strdup(make_timestamp(NULL, !BSDOutputFormat))) == NULL)
+		logerror("Failed to allocate memory for timestamp");
 	buffer->prog = appname;
 	buffer->pid = include_pid;
 	buffer->recvhost = buffer->host = LocalFQDN;
@@ -2488,8 +2509,10 @@ fprintlog(struct filed *f, struct buf_msg *passedbuffer, struct buf_queue *qentr
 			buffer = buf_msg_new(REPBUFSIZE);
 			buffer->msglen = snprintf(buffer->msg, REPBUFSIZE,
 			    "last message repeated %d times", f->f_prevcount);
-			buffer->timestamp =
-				strdup(make_timestamp(NULL, !BSDOutputFormat));
+			buffer->timestamp = strdup(make_timestamp(NULL,
+			    !BSDOutputFormat));
+			if (buffer->timestamp == NULL)
+				logerror("Failed to allocate timestamp");
 			buffer->pri = f->f_prevmsg->pri;
 			buffer->host = LocalFQDN;
 			buffer->prog = appname;
@@ -4000,15 +4023,22 @@ cfline(size_t linenum, const char *line, struct filed *f, const char *prog,
 	if (*host == '*')
 		f->f_host = NULL;
 	else {
-		f->f_host = strdup(host);
+		if ((f->f_host = strdup(host)) == NULL) {
+			logerror("Failed to allocate memory");
+			return;
+		}
 		trim_anydomain(f->f_host);
 	}
 
 	/* save program name, if any */
 	if (*prog == '*')
 		f->f_program = NULL;
-	else
-		f->f_program = strdup(prog);
+	else {
+		if ((f->f_program = strdup(prog)) == NULL) {
+			logerror("Failed to allocate memory");
+			return;
+		}
+	}
 
 	/* scan through the list of selectors */
 	for (p = line; *p && !isblank((unsigned char)*p);) {
@@ -4606,7 +4636,7 @@ deadq_enter(pid_t pid, const char *name)
 	p = malloc(sizeof(*p));
 	if (p == NULL) {
 		logerror("panic: out of memory!");
-		exit(1);
+		die(0, 0, NULL);
 	}
 
 	p->dq_pid = pid;
