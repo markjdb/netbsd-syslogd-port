@@ -5,7 +5,7 @@ SRC=${.CURDIR}/../../dist
 
 PROG=	syslogd
 SRCS=	syslogd.c tls.c sign.c
-MAN=	syslog.conf.5 syslogd.8
+MAN=
 
 WARNS?=	3
 
@@ -21,6 +21,12 @@ CFLAGS+=-DINET6
 .if ${MK_OPENSSL} != "no"
 LDADD+=	-lssl -lcrypto
 DPADD+=	${LIBSSL} ${LIBCRYPTO}
+.else
+CFLAGS+=-DDISABLE_TLS -DDISABLE_SIGN
 .endif
+
+CFLAGS+=-DLIBWRAP
+LDADD+=	-lwrap
+DPADD+=	${LIBWRAP}
 
 .include <bsd.prog.mk>
