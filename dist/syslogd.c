@@ -773,8 +773,9 @@ usage(void)
 
 	(void)fprintf(stderr,
 	    "usage: %s [-46ACcdkNnorSsTuv] [-b [bind_address]:service]\n"
-	    "\t[-f config_file] [-G group] [-m mark_interval] [-P pidfile]\n"
-	    "\t[-p log_socket [-p log_socket2 ...]] [-t chroot_dir] [-U user]\n",
+	    "\t[-f config_file] [-G group] [-l [mode:]path] [-m mark_interval]\n"
+	    "\t[-P pidfile] [-p log_socket] [-S log_socket] [-t chroot_dir]\n"
+	    "\t[-U user]\n",
 	    getprogname());
 	exit(1);
 }
