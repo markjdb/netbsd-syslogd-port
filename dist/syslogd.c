@@ -480,8 +480,7 @@ main(int argc, char *argv[])
 				usage();
 			break;
 		case 'v':		/* log facility and priority */
-			if (LogFacPri < 2)
-				LogFacPri++;
+			LogFacPri++;
 			break;
 		default:
 			usage();
@@ -2166,7 +2165,7 @@ logmsg(struct buf_msg *buffer)
 		/* do we compare with host (IMHO correct) or recvhost */
 		/* (compatible)? */
 		if (f->f_host != NULL && buffer->host != NULL) {
-			char shost[MAXHOSTNAMELEN + 1], *h;
+			char shost[MAXHOSTNAMELEN], *h;
 			if (!BSDOutputFormat) {
 				h = buffer->host;
 			} else {
@@ -3534,7 +3533,7 @@ read_config_file(FILE *cf, struct filed **f_ptr)
 			}
 			/* the +hostname expression will continue
 			 * to use the LocalHostName, not the FQDN */
-			for (i = 1; i < MAXHOSTNAMELEN - 1; i++) {
+			for (i = 1; i < MAXHOSTNAMELEN; i++) {
 				if (*p == '@') {
 					(void)strncpy(&host[i], LocalHostName,
 					    sizeof(host) - 1 - i);
