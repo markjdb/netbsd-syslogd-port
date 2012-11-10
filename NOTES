@@ -37,7 +37,8 @@
    * -8: don't mess with the high bit
    * -A: when forwarding to a host, try to send the message to all address
          records (done)
-   * -a peer: allow the specified peer to log to this syslogd instance
+   * -a peer: allow the specified peer to log to this syslogd instance (done)
+     - why not use hosts.allow? :(
    * -b 'host:port': bind to the specific host/port (NetBSD doesn't provide
                      the port field, but the option is otherwise there) (done)
    * -C: create log files if they don't exist (done)
@@ -49,9 +50,14 @@
 
 - Add "sync log file" syntax to syslog.conf
 - Man page updates
-- Add -8, -a
+- Add -8
+- IPv6 support for syslog.conf, -b...
 
 5. Random observations.
 
 - FreeBSD is calling double_rbuf() in the wrong place for local sockets.
 - NetBSD is using strncpy incorrectly(?) when allocating local sockets
+- Various options will need to be expanded to allow for non-UDP transports
+  (e.g. -a)
+- We need to try creating the PID file earlier - otherwise we unlink an
+  already-running syslogd's sockets..
