@@ -201,6 +201,7 @@ struct	filed consfile;
 time_t	now;
 int	Debug = D_NONE;		/* debug flag */
 int	daemonized = 0;		/* we are not daemonized yet */
+char	*LocalDomain = NULL;	/* our domain */
 char	*LocalFQDN = NULL;	       /* our FQDN */
 char	*oldLocalFQDN = NULL;	       /* our previous FQDN */
 char	LocalHostName[MAXHOSTNAMELEN]; /* our hostname */
@@ -281,6 +282,7 @@ uint_fast32_t	get_utf8_value(const char*);
 unsigned	valid_utf8(const char *);
 static unsigned check_sd(char*);
 static unsigned check_msgid(char *);
+static int	validate(struct sockaddr *, const char *);
 /* event handling */
 static void	dispatch_read_klog(int fd, short event, void *ev);
 static void	dispatch_read_finet(int fd, short event, void *ev);
@@ -860,6 +862,7 @@ dispatch_read_finet(int fd, short event, void *ev)
 	struct sockaddr_storage frominet;
 	ssize_t rv;
 	socklen_t len;
+	const char *hname;
 	int reject = 0;
 
 	DPRINTF((D_CALL|D_EVENT|D_NET), "inet socket active (%d, %d %p) "
@@ -884,10 +887,13 @@ dispatch_read_finet(int fd, short event, void *ev)
 		return;
 	}
 
+	hname = cvthname(&frominet);
+	if (!validate((struct sockaddr *)&frominet, hname))
+		reject = 1;
+
 	linebuf[rv] = '\0';
 	if (!reject)
-		printline(cvthname(&frominet), linebuf,
-		    RemoteAddDate ? ADDDATE : 0);
+		printline(hname, linebuf, RemoteAddDate ? ADDDATE : 0);
 }
 
 /*
@@ -2832,7 +2838,7 @@ sendagain:
 		}
 		if ((size_t)lsent != len && fail) {
 			f->f_type = F_UNUSED;
-			logerror("sendto() failed: %s", strerror(errno));
+			logerror("sendto() failed");
 		} else if ((size_t)lsent == len && !send_to_all)
 			break;
 	}
@@ -3667,10 +3673,13 @@ init(int fd, short event, void *ev)
 	FREEPTR(oldLocalFQDN);
 	oldLocalFQDN = LocalFQDN;
 	LocalFQDN = getLocalFQDN();
-	if ((p = strchr(LocalFQDN, '.')) != NULL)
+	if ((p = strchr(LocalFQDN, '.')) != NULL) {
 		(void)strlcpy(LocalHostName, LocalFQDN, 1+p-LocalFQDN);
-	else
+		LocalDomain = p + 1;
+	} else {
 		(void)strlcpy(LocalHostName, LocalFQDN, sizeof(LocalHostName));
+		LocalDomain = "";
+	}
 
 	/*
 	 *  Reset counter of forwarding actions
@@ -4384,6 +4393,120 @@ socksetup(int af, const char *hostname)
 			die(0, 0, NULL);
 	}
 	return socks;
+}
+
+/*
+ * Verify that the remote peer has permission to log to us.
+ */
+static int
+validate(struct sockaddr *sa, const char *hname)
+{
+	int i;
+	size_t l1, l2;
+	char *cp, name[NI_MAXHOST], ip[NI_MAXHOST], port[NI_MAXSERV];
+	struct allowedpeer *ap;
+	struct sockaddr_in *sin4, *a4p = NULL, *m4p = NULL;
+#ifdef INET6
+	int j, reject;
+	struct sockaddr_in6 *sin6, *a6p = NULL, *m6p = NULL;
+#endif
+	struct addrinfo hints, *res;
+	u_short sport;
+
+	if (num_peers == 0)
+		/* traditional behaviour, allow everything */
+		return (1);
+
+	(void)strlcpy(name, hname, sizeof(name));
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = PF_UNSPEC;
+	hints.ai_socktype = SOCK_DGRAM;
+	hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
+	if (getaddrinfo(name, NULL, &hints, &res) == 0)
+		freeaddrinfo(res);
+	else if (strchr(name, '.') == NULL) {
+		strlcat(name, ".", sizeof(name));
+		strlcat(name, LocalDomain, sizeof(name));
+	}
+	if (getnameinfo(sa, sa->sa_len, ip, sizeof(ip), port, sizeof(port),
+	    NI_NUMERICHOST | NI_NUMERICSERV) != 0)
+		return (0);	/* for safety, should not occur */
+	DPRINTF(D_NET, "validate: dgram from IP %s, port %s, name %s;\n",
+	    ip, port, name);
+	sport = atoi(port);
+
+	/* now, walk down the list */
+	for (i = 0, ap = allowed_peers; i < num_peers; i++, ap++) {
+		if (ap->port != 0 && ap->port != sport) {
+			DPRINTF(D_NET, "rejected in rule %d due to port mismatch.\n", i);
+			continue;
+		}
+
+		if (ap->isnumeric) {
+			if (ap->a_addr.ss_family != sa->sa_family) {
+				DPRINTF(D_NET, "rejected in rule %d due to address family mismatch.\n", i);
+				continue;
+			}
+			if (ap->a_addr.ss_family == AF_INET) {
+				sin4 = (struct sockaddr_in *)sa;
+				a4p = (struct sockaddr_in *)&ap->a_addr;
+				m4p = (struct sockaddr_in *)&ap->a_mask;
+				if ((sin4->sin_addr.s_addr & m4p->sin_addr.s_addr)
+				    != a4p->sin_addr.s_addr) {
+					DPRINTF(D_NET, "rejected in rule %d due to IP mismatch.\n", i);
+					continue;
+				}
+			}
+#ifdef INET6
+			else if (ap->a_addr.ss_family == AF_INET6) {
+				sin6 = (struct sockaddr_in6 *)sa;
+				a6p = (struct sockaddr_in6 *)&ap->a_addr;
+				m6p = (struct sockaddr_in6 *)&ap->a_mask;
+				if (a6p->sin6_scope_id != 0 &&
+				    sin6->sin6_scope_id != a6p->sin6_scope_id) {
+					DPRINTF(D_NET, "rejected in rule %d due to scope mismatch.\n", i);
+					continue;
+				}
+				reject = 0;
+				for (j = 0; j < 16; j += 4) {
+					if ((*(u_int32_t *)&sin6->sin6_addr.s6_addr[j] & *(u_int32_t *)&m6p->sin6_addr.s6_addr[j])
+					    != *(u_int32_t *)&a6p->sin6_addr.s6_addr[j]) {
+						++reject;
+						break;
+					}
+				}
+				if (reject) {
+					DPRINTF(D_NET, "rejected in rule %d due to IP mismatch.\n", i);
+					continue;
+				}
+			}
+#endif
+			else
+				continue;
+		} else {
+			cp = ap->a_name;
+			l1 = strlen(name);
+			if (*cp == '*') {
+				/* allow wildmatch */
+				cp++;
+				l2 = strlen(cp);
+				if (l2 > l1 || memcmp(cp, &name[l1 - l2], l2) != 0) {
+					DPRINTF(D_NET, "rejected in rule %d due to name mismatch.\n", i);
+					continue;
+				}
+			} else {
+				/* exact match */
+				l2 = strlen(cp);
+				if (l2 != l1 || memcmp(cp, name, l1) != 0) {
+					DPRINTF(D_NET, "rejected in rule %d due to name mismatch.\n", i);
+					continue;
+				}
+			}
+		}
+		DPRINTF(D_NET, "accepted in rule %d.\n", i);
+		return (1);	/* hooray! */
+	}
+	return (0);
 }
 
 /*
@@ -5111,6 +5234,5 @@ double_rbuf(int s)
 		len *= 2;
 		setsockopt(s, SOL_SOCKET, SO_RCVBUF, &len, slen);
 	} else
-		DPRINTF(D_NET, "Failed to get rcvbuf size of descriptor %d: %s",
-		    s, strerror(errno));
+		logerror("getsockopt() of descriptor %d", s);
 }
