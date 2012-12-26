@@ -4386,12 +4386,14 @@ socksetup(int af, const char *hostname)
 			logerror("socket() failed");
 			continue;
 		}
+#ifdef INET6
 		if (r->ai_family == AF_INET6 && setsockopt(s->fd, IPPROTO_IPV6,
 		    IPV6_V6ONLY, &on, sizeof(on)) < 0) {
 			logerror("setsockopt(IPV6_V6ONLY) failed");
 			close(s->fd);
 			continue;
 		}
+#endif
 
 		if (!NoBind) {
 			if (bind(s->fd, r->ai_addr, r->ai_addrlen) < 0) {
