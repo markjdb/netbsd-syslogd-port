@@ -38,7 +38,6 @@
    * -A: when forwarding to a host, try to send the message to all address
          records (done)
    * -a peer: allow the specified peer to log to this syslogd instance (done)
-     - why not use hosts.allow? :(
    * -b 'host:port': bind to the specific host/port (NetBSD doesn't provide
                      the port field, but the option is otherwise there) (done)
    * -C: create log files if they don't exist (done)
@@ -51,7 +50,14 @@
 - Add "sync log file" syntax to syslog.conf
 - Man page updates
 - Add -8
+  - I don't really want to do this - by default, syslogd maps C1 sequences
+    (which fall in the range 0x80 to 0x9F) in the message body to some ASCII
+    representation. What's the point of that? Then -8 needed to be added to
+    ensure that UTF8-encoded messages don't get mangled. Moreover, rfc5424
+    recommends the use of UTF-8.
 - IPv6 support for syslog.conf, -b...
+- Add ability to bind to multiple sockets with -b (bin/159305)
+- Add support for multiple configuration files (Ryan posted about this somewhere)
 
 5. Random observations.
 
@@ -61,3 +67,10 @@
   (e.g. -a)
 - We need to try creating the PID file earlier - otherwise we unlink an
   already-running syslogd's sockets..
+- The implementation of -a is really ugly. I'd like to get rid of it and just
+  say "use hosts.allow".
+
+6. FreeBSD changes that need to be ported over.
+- Support for IPv6 addrs in the destination of a syslog.conf rule.
+- Tell the kernel that syslogd shouldn't be killed when swap space is exhausted
+- avoiding races in signal handlers
